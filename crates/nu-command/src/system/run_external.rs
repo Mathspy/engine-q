@@ -4,7 +4,7 @@ use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command as CommandSys, Stdio};
 use std::sync::atomic::Ordering;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, Receiver};
 
 use nu_protocol::engine::{EngineState, Stack};
 use nu_protocol::{ast::Call, engine::Command, ShellError, Signature, SyntaxShape, Value};
@@ -57,7 +57,20 @@ impl Command for External {
             last_expression,
             env_vars,
         };
-        command.run_with_input(engine_state, input, config)
+        command
+            .run_with_input(engine_state, input, config)
+            .map(|(data, status_rx)| {
+                std::thread::spawn(move || match status_rx.recv() {
+                    Ok(code) => {
+                        if let Some(code) = code {
+                            stack.add_env_var("LAST_EXIT_CODE".to_string(), code.to_string());
+                        }
+                    }
+                    Err(_) => {}
+                });
+
+                data
+            })
     }
 }
 
@@ -74,7 +87,7 @@ impl ExternalCommand {
         engine_state: &EngineState,
         input: PipelineData,
         config: Config,
-    ) -> Result<PipelineData, ShellError> {
+    ) -> Result<(PipelineData, Receiver<Option<i32>>), ShellError> {
         let mut process = self.create_command();
 
         let ctrlc = engine_state.ctrlc.clone();
@@ -137,6 +150,7 @@ impl ExternalCommand {
                 let span = self.name.span;
                 let output_ctrlc = ctrlc.clone();
                 let (tx, rx) = mpsc::channel();
+                let (status_tx, status_rx) = mpsc::channel();
 
                 std::thread::spawn(move || {
                     // If this external is not the last expression, then its output is piped to a channel
@@ -188,14 +202,18 @@ impl ExternalCommand {
 
                     match child.wait() {
                         Err(err) => Err(ShellError::ExternalCommand(format!("{}", err), span)),
-                        Ok(_) => Ok(()),
+                        Ok(status) => {
+                            let _ = status_tx.send(status.code());
+
+                            Ok(())
+                        }
                     }
                 });
                 // The ValueStream is consumed by the next expression in the pipeline
                 let value =
                     ChannelReceiver::new(rx, self.name.span).into_pipeline_data(output_ctrlc);
 
-                Ok(value)
+                Ok((value, status_rx))
             }
         }
     }
