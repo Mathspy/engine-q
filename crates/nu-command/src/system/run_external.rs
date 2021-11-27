@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command as CommandSys, Stdio};
-use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{atomic::Ordering, Arc};
 
 use nu_protocol::engine::{EngineState, Stack};
 use nu_protocol::{ast::Call, engine::Command, ShellError, Signature, SyntaxShape, Value};
@@ -60,10 +60,12 @@ impl Command for External {
         command
             .run_with_input(engine_state, input, config)
             .map(|(data, status_rx)| {
+                let exit_code = Arc::clone(&stack.exit_code);
+
                 std::thread::spawn(move || match status_rx.recv() {
                     Ok(code) => {
                         if let Some(code) = code {
-                            stack.add_env_var("LAST_EXIT_CODE".to_string(), code.to_string());
+                            *exit_code.lock().unwrap() = Some(code);
                         }
                     }
                     Err(_) => {}

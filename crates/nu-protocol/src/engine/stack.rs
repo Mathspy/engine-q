@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use crate::{Config, ShellError, Value, VarId, CONFIG_VARIABLE_ID};
 
@@ -23,6 +26,7 @@ use crate::{Config, ShellError, Value, VarId, CONFIG_VARIABLE_ID};
 pub struct Stack {
     pub vars: HashMap<VarId, Value>,
     pub env_vars: HashMap<String, String>,
+    pub exit_code: Arc<Mutex<Option<i32>>>,
 }
 
 impl Default for Stack {
@@ -36,6 +40,7 @@ impl Stack {
         Stack {
             vars: HashMap::new(),
             env_vars: HashMap::new(),
+            exit_code: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -113,5 +118,11 @@ impl Stack {
         for (var, val) in &self.env_vars {
             println!("  {}: {:?}", var, val);
         }
+        let exit_code = Arc::clone(&self.exit_code)
+            .lock()
+            .unwrap()
+            .map(|exit_code| exit_code.to_string())
+            .unwrap_or("NONE".to_string());
+        println!("exit code: {}", exit_code);
     }
 }

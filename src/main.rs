@@ -269,6 +269,12 @@ fn main() -> Result<()> {
             let input = line_editor.read_line(prompt);
             match input {
                 Ok(Signal::Success(s)) => {
+                    // TODO: Remove this, I only added this for quickly inspecting the stack
+                    if s.trim() == "stack" {
+                        stack.print_stack();
+                        continue;
+                    }
+
                     eval_source(
                         &mut engine_state,
                         &mut stack,
